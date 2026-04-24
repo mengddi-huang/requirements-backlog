@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>需求管理 · Requirements Backlog</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-elev: #171a21;
+    --bg-chrome: #1c2029;
+    --stroke: #262b36;
+    --stroke-2: #343a48;
+    --text: #e6e8ec;
+    --text-2: #a7adbb;
+    --text-3: #6b7386;
+    --text-4: #4a5063;
+    --accent: #4c8dff;
+    --danger: #ff5c63;
+    --warning: #ffb84c;
+    --success: #3ccf91;
+    --info: #52aef2;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fbfbfc;
+      --bg-elev: #ffffff;
+      --bg-chrome: #f3f4f7;
+      --stroke: #e3e5eb;
+      --stroke-2: #c9ccd6;
+      --text: #1a1d23;
+      --text-2: #555b6a;
+      --text-3: #838998;
+      --text-4: #a9aebb;
+      --accent: #2f6fe5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px; line-height: 1.5; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 28px 24px 80px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 600; letter-spacing: -0.2px; }
+  h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .divider { height: 1px; background: var(--stroke); margin: 20px 0; border: 0; }
+  .muted { color: var(--text-3); }
+  .small { font-size: 12px; }
+  .micro { font-size: 11px; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+  .stat { border: 1px solid var(--stroke); border-radius: 10px; padding: 14px 16px; background: var(--bg-elev); }
+  .stat .v { font-size: 24px; font-weight: 600; letter-spacing: -0.3px; }
+  .stat .l { color: var(--text-3); font-size: 12px; margin-top: 4px; }
+  .stat.danger .v { color: var(--danger); }
+  .stat.warning .v { color: var(--warning); }
+
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 10px; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--stroke-2);
+    border-radius: 999px; background: transparent; color: var(--text-2); cursor: pointer; font-size: 12px;
+    user-select: none; transition: all 0.1s; }
+  .pill:hover { background: var(--bg-chrome); color: var(--text); }
+  .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pill.static { cursor: default; padding: 2px 8px; font-size: 11px; }
+  .pill.tone-info { color: var(--info); border-color: var(--info); }
+  .pill.tone-warning { color: var(--warning); border-color: var(--warning); }
+  .pill.tone-danger { color: var(--danger); border-color: var(--danger); }
+  .pill.tone-success { color: var(--success); border-color: var(--success); }
+
+  .btn { height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--stroke-2); background: transparent;
+    color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; }
+  .btn:hover { background: var(--bg-chrome); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.ghost { border-color: transparent; color: var(--text-2); }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--stroke);
+    border-radius: 10px; overflow: hidden; background: var(--bg-elev); }
+  thead th { text-align: left; padding: 9px 10px; font-weight: 500; font-size: 11px; color: var(--text-3);
+    background: var(--bg-chrome); border-bottom: 1px solid var(--stroke); position: sticky; top: 0; z-index: 1;
+    text-transform: uppercase; letter-spacing: 0.5px; }
+  tbody td { padding: 6px 8px; border-bottom: 1px solid var(--stroke); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+  tbody tr.tone-success td { background: rgba(60, 207, 145, 0.08); }
+  tbody tr.tone-info td { background: rgba(82, 174, 242, 0.07); }
+  tbody tr.tone-danger td { background: rgba(255, 92, 99, 0.08); }
+
+  input[type=text], textarea, select {
+    width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px;
+    background: transparent; color: var(--text); font: inherit; font-size: 12px; outline: none;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  input[type=text]:hover, textarea:hover, select:hover { background: var(--bg-chrome); }
+  input[type=text]:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--bg); }
+  textarea { resize: vertical; min-height: 28px; line-height: 1.4; font-family: inherit; }
+  select { appearance: none; padding-right: 22px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23a7adbb' d='M1 3l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; }
+
+  .icon-btn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 4px; border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 13px; }
+  .icon-btn:hover { background: var(--bg-chrome); color: var(--danger); }
+
+  .col-cat { width: 100px; }
+  .col-pri { width: 90px; }
+  .col-wl { width: 85px; }
+  .col-owner { width: 100px; }
+  .col-status { width: 100px; }
+  .col-ops { width: 40px; text-align: right; }
+  .col-note { min-width: 200px; }
+
+  .dist { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+  .dist-card { padding: 12px; border: 1px solid var(--stroke); border-radius: 10px; background: var(--bg-elev); }
+  .dist-card ul { margin: 8px 0 0; padding: 0; list-style: none; }
+  .dist-card li { color: var(--text-2); font-size: 12px; padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dist-card .head { display: flex; justify-content: space-between; align-items: center; }
+
+  @media (max-width: 860px) {
+    .stats, .dist { grid-template-columns: repeat(2, 1fr); }
+    .wrap { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <h1>需求管理</h1>
+    <span class="spacer"></span>
+    <span class="muted small" id="summary"></span>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <hr class="divider" />
+
+  <div class="controls">
+    <span class="muted small">筛选</span>
+    <button class="pill" data-filter="全部">全部</button>
+    <button class="pill" data-filter="广告投放">广告投放</button>
+    <button class="pill" data-filter="银行营销">银行营销</button>
+    <span style="width:12px"></span>
+    <span class="muted small">排序</span>
+    <button class="pill" data-sort="priority">按优先级</button>
+    <button class="pill" data-sort="workload">按工作量</button>
+    <button class="pill" data-sort="none">原始</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="btn-reset">重置</button>
+    <button class="btn" id="btn-add-bank">+ 银行营销</button>
+    <button class="btn primary" id="btn-add-ad">+ 广告投放</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-cat">分类</th>
+        <th>需求</th>
+        <th class="col-pri">优先级</th>
+        <th class="col-wl">工作量</th>
+        <th class="col-owner">负责人</th>
+        <th class="col-status">状态</th>
+        <th class="col-note">备注</th>
+        <th class="col-ops"></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <hr class="divider" />
+
+  <h2>优先级分布</h2>
+  <div class="dist" id="dist"></div>
+
+  <p class="micro muted" style="margin-top:24px">
+    提示：单元格直接编辑，改动仅保存在你当前浏览器的 localStorage。如需共享编辑版本，请把修改后的数据导出给他人或再部署一份。
+  </p>
+</div>
+
+<script>
+const PRIORITY_OPTIONS = [
+  { v: "P0", l: "P0 最高" },
+  { v: "P1", l: "P1 高" },
+  { v: "P2", l: "P2 中" },
+  { v: "P3", l: "P3 低" },
+];
+const STATUS_OPTIONS = ["待排期", "排期中", "进行中", "已完成", "阻塞"];
+const WORKLOAD_OPTIONS = ["0.5", "1", "2", "3", "5", "8", "13", "21"];
+const PRIORITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+const INITIAL = [
+  { id: "ad-1", category: "广告投放", name: "智能创意", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
+  { id: "ad-2", category: "广告投放", name: "组件生图", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
+  { id: "ad-3", category: "广告投放", name: "素材分析", priority: "P2", workload: "3", owner: "", status: "待排期", note: "" },
+  { id: "ad-4", category: "广告投放", name: "素材卖点打标", priority: "P2", workload: "3", owner: "", status: "待排期", note: "" },
+  { id: "ad-5", category: "广告投放", name: "业务单元、广告账户、RTA策略管理", priority: "P0", workload: "8", owner: "majun", status: "待排期", note: "" },
+  { id: "bk-1", category: "银行营销", name: "服务商需求", priority: "P1", workload: "3", owner: "", status: "待排期", note: "" },
+  { id: "bk-2", category: "银行营销", name: "Excel 填单", priority: "P2", workload: "2", owner: "", status: "待排期", note: "" },
+  { id: "bk-3", category: "银行营销", name: "智能投放标准页面、精准页面", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
+  { id: "bk-4", category: "银行营销", name: "精准效果看板", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
+];
+
+const KEY_ROWS = "reqmgmt.rows.v1";
+const KEY_FILTER = "reqmgmt.filter.v1";
+const KEY_SORT = "reqmgmt.sort.v1";
+
+let state = {
+  rows: load(KEY_ROWS, INITIAL),
+  filter: load(KEY_FILTER, "全部"),
+  sort: load(KEY_SORT, "priority"),
+};
+
+function load(k, d) {
+  try {
+    const v = localStorage.getItem(k);
+    return v == null ? d : JSON.parse(v);
+  } catch { return d; }
+}
+function save() {
+  localStorage.setItem(KEY_ROWS, JSON.stringify(state.rows));
+  localStorage.setItem(KEY_FILTER, JSON.stringify(state.filter));
+  localStorage.setItem(KEY_SORT, JSON.stringify(state.sort));
+}
+function makeId() { return "req-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6); }
+
+function rowTone(status) {
+  if (status === "已完成") return "tone-success";
+  if (status === "阻塞") return "tone-danger";
+  if (status === "进行中") return "tone-info";
+  return "";
+}
+function priTone(p) {
+  if (p === "P0") return "tone-danger";
+  if (p === "P1") return "tone-warning";
+  if (p === "P2") return "tone-info";
+  return "";
+}
+function catTone(c) { return c === "广告投放" ? "tone-info" : "tone-warning"; }
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const k in attrs) {
+    if (k === "class") el.className = attrs[k];
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+    else if (k === "value") el.value = attrs[k];
+    else if (attrs[k] != null) el.setAttribute(k, attrs[k]);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.appendChild(typeof kid === "string" || typeof kid === "number" ? document.createTextNode(String(kid)) : kid);
+  }
+  return el;
+}
+
+function render() {
+  renderStats();
+  renderControls();
+  renderTable();
+  renderDist();
+  save();
+}
+
+function renderStats() {
+  const rows = state.rows;
+  const totalPd = rows.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
+  const p0 = rows.filter(r => r.priority === "P0").length;
+  const done = rows.filter(r => r.status === "已完成").length;
+  const blocked = rows.filter(r => r.status === "阻塞").length;
+
+  document.getElementById("summary").textContent = `共 ${rows.length} 条 · 合计 ${totalPd} pd`;
+
+  const el = document.getElementById("stats");
+  el.innerHTML = "";
+  el.append(
+    h("div", { class: "stat" }, h("div", { class: "v" }, rows.length), h("div", { class: "l" }, "需求总数")),
+    h("div", { class: "stat" + (p0 > 0 ? " danger" : "") }, h("div", { class: "v" }, p0), h("div", { class: "l" }, "P0 最高优")),
+    h("div", { class: "stat" }, h("div", { class: "v" }, totalPd), h("div", { class: "l" }, "总工作量 (pd)")),
+    h("div", { class: "stat" + (blocked > 0 ? " warning" : "") }, h("div", { class: "v" }, `${done}/${rows.length}`),
+      h("div", { class: "l" }, blocked > 0 ? `已完成 · ${blocked} 阻塞` : "已完成")),
+  );
+}
+
+function renderControls() {
+  document.querySelectorAll("[data-filter]").forEach(b => {
+    b.classList.toggle("active", b.dataset.filter === state.filter);
+  });
+  document.querySelectorAll("[data-sort]").forEach(b => {
+    b.classList.toggle("active", b.dataset.sort === state.sort);
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+
+  let list = state.rows.slice();
+  if (state.filter !== "全部") list = list.filter(r => r.category === state.filter);
+  if (state.sort === "priority") list.sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
+  else if (state.sort === "workload") list.sort((a, b) => parseFloat(a.workload) - parseFloat(b.workload));
+
+  if (list.length === 0) {
+    tbody.append(h("tr", {}, h("td", { colspan: 8, style: "text-align:center; padding:24px; color: var(--text-3);" },
+      "当前筛选下没有需求，点击右上角按钮添加。")));
+    return;
+  }
+
+  for (const r of list) {
+    const tr = h("tr", { class: rowTone(r.status) });
+
+    tr.append(h("td", {}, h("span", { class: "pill static " + catTone(r.category) }, r.category)));
+
+    tr.append(h("td", {},
+      h("input", { type: "text", value: r.name, placeholder: "需求名称",
+        oninput: e => { r.name = e.target.value; save(); } })));
+
+    tr.append(h("td", {}, mkSelect(PRIORITY_OPTIONS.map(o => ({ v: o.v, l: o.l })), r.priority,
+      v => { r.priority = v; render(); })));
+
+    tr.append(h("td", {}, mkSelect(WORKLOAD_OPTIONS.map(v => ({ v, l: v + " pd" })), r.workload,
+      v => { r.workload = v; render(); })));
+
+    tr.append(h("td", {},
+      h("input", { type: "text", value: r.owner, placeholder: "—",
+        oninput: e => { r.owner = e.target.value; save(); } })));
+
+    tr.append(h("td", {}, mkSelect(STATUS_OPTIONS.map(v => ({ v, l: v })), r.status,
+      v => { r.status = v; render(); })));
+
+    tr.append(h("td", {},
+      h("textarea", { rows: 1, placeholder: "备注 / 风险 / 依赖",
+        oninput: e => { r.note = e.target.value; save(); } }, r.note)));
+
+    tr.append(h("td", { class: "col-ops" }, h("button", {
+      class: "icon-btn", title: "删除",
+      onclick: () => { state.rows = state.rows.filter(x => x.id !== r.id); render(); }
+    }, "✕")));
+
+    tbody.append(tr);
+  }
+}
+
+function mkSelect(options, value, onchange) {
+  const sel = h("select", { onchange: e => onchange(e.target.value) });
+  for (const o of options) {
+    const opt = h("option", { value: o.v }, o.l);
+    if (o.v === value) opt.selected = true;
+    sel.append(opt);
+  }
+  return sel;
+}
+
+function renderDist() {
+  const el = document.getElementById("dist");
+  el.innerHTML = "";
+  for (const p of ["P0", "P1", "P2", "P3"]) {
+    const items = state.rows.filter(r => r.priority === p);
+    const pd = items.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
+    const card = h("div", { class: "dist-card" },
+      h("div", { class: "head" },
+        h("span", { class: "pill static " + priTone(p), style: "background:" + (p === "P0" ? "rgba(255,92,99,0.15)" : p === "P1" ? "rgba(255,184,76,0.15)" : p === "P2" ? "rgba(82,174,242,0.12)" : "transparent") }, p),
+        h("span", { class: "muted micro" }, `${items.length} 条 · ${pd} pd`)),
+      items.length === 0
+        ? h("div", { class: "muted small", style: "margin-top:8px;color:var(--text-4)" }, "无")
+        : h("ul", {}, ...items.map(it => h("li", { title: it.name }, "· " + (it.name || "（未命名）"))))
+    );
+    el.append(card);
+  }
+}
+
+function addRow(category) {
+  state.rows.push({
+    id: makeId(), category, name: "", priority: "P2", workload: "3",
+    owner: "", status: "待排期", note: "",
+  });
+  render();
+}
+
+document.querySelectorAll("[data-filter]").forEach(b => {
+  b.addEventListener("click", () => { state.filter = b.dataset.filter; render(); });
+});
+document.querySelectorAll("[data-sort]").forEach(b => {
+  b.addEventListener("click", () => { state.sort = b.dataset.sort; render(); });
+});
+document.getElementById("btn-reset").addEventListener("click", () => {
+  if (confirm("恢复到初始需求列表？当前改动会被清除。")) {
+    state.rows = JSON.parse(JSON.stringify(INITIAL));
+    render();
+  }
+});
+document.getElementById("btn-add-ad").addEventListener("click", () => addRow("广告投放"));
+document.getElementById("btn-add-bank").addEventListener("click", () => addRow("银行营销"));
+
+render();
+</script>
+</body>
+</html>
