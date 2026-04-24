@@ -146,6 +146,7 @@
     <button class="pill" data-filter="全部">全部</button>
     <button class="pill" data-filter="广告投放">广告投放</button>
     <button class="pill" data-filter="银行营销">银行营销</button>
+    <button class="pill" data-filter="其他">其他</button>
     <span style="width:12px"></span>
     <span class="muted small">排序</span>
     <button class="pill" data-sort="priority">按优先级</button>
@@ -156,6 +157,7 @@
     <button class="btn ghost" id="btn-import" title="从 JSON 文件恢复">导入</button>
     <input type="file" id="file-import" accept="application/json,.json" style="display:none" />
     <button class="btn ghost" id="btn-reset">重置</button>
+    <button class="btn" id="btn-add-other">+ 其他</button>
     <button class="btn" id="btn-add-bank">+ 银行营销</button>
     <button class="btn primary" id="btn-add-ad">+ 广告投放</button>
   </div>
@@ -196,7 +198,7 @@ const PRIORITY_OPTIONS = [
   { v: "P2", l: "P2 中" },
   { v: "P3", l: "P3 低" },
 ];
-const STATUS_OPTIONS = ["待排期", "排期中", "进行中", "已完成", "阻塞"];
+const STATUS_OPTIONS = ["待排期", "待产品方案", "开发中", "测试中", "待验收", "已上线"];
 const PRIORITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
 const INITIAL = [
@@ -321,9 +323,9 @@ function publishNow(reason) {
 
 // ==== Rendering ====
 function rowTone(s) {
-  if (s === "已完成") return "tone-success";
-  if (s === "阻塞") return "tone-danger";
-  if (s === "进行中") return "tone-info";
+  if (s === "已上线") return "tone-success";
+  if (s === "待验收") return "tone-warning";
+  if (s === "开发中" || s === "测试中") return "tone-info";
   return "";
 }
 function priTone(p) {
@@ -332,7 +334,11 @@ function priTone(p) {
   if (p === "P2") return "tone-info";
   return "";
 }
-function catTone(c) { return c === "广告投放" ? "tone-info" : "tone-warning"; }
+function catTone(c) {
+  if (c === "广告投放") return "tone-info";
+  if (c === "银行营销") return "tone-warning";
+  return "";
+}
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
@@ -524,6 +530,7 @@ document.getElementById("btn-reset").addEventListener("click", () => {
 });
 document.getElementById("btn-add-ad").addEventListener("click", () => addRow("广告投放"));
 document.getElementById("btn-add-bank").addEventListener("click", () => addRow("银行营销"));
+document.getElementById("btn-add-other").addEventListener("click", () => addRow("其他"));
 
 document.getElementById("btn-export").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(state.rows, null, 2)], { type: "application/json" });
