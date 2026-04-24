@@ -258,6 +258,14 @@ function render() {
   save();
 }
 
+// Light re-render for text edits: updates summary/stats/distribution
+// without rebuilding the table (so the focused input keeps its caret).
+function renderSoft() {
+  renderStats();
+  renderDist();
+  save();
+}
+
 function renderStats() {
   const rows = state.rows;
   const totalPd = rows.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
@@ -309,7 +317,7 @@ function renderTable() {
 
     tr.append(h("td", {},
       h("input", { type: "text", value: r.name, placeholder: "需求名称",
-        oninput: e => { r.name = e.target.value; save(); } })));
+        oninput: e => { r.name = e.target.value; renderSoft(); } })));
 
     tr.append(h("td", {}, mkSelect(PRIORITY_OPTIONS.map(o => ({ v: o.v, l: o.l })), r.priority,
       v => { r.priority = v; render(); })));
@@ -319,14 +327,14 @@ function renderTable() {
 
     tr.append(h("td", {},
       h("input", { type: "text", value: r.owner, placeholder: "—",
-        oninput: e => { r.owner = e.target.value; save(); } })));
+        oninput: e => { r.owner = e.target.value; renderSoft(); } })));
 
     tr.append(h("td", {}, mkSelect(STATUS_OPTIONS.map(v => ({ v, l: v })), r.status,
       v => { r.status = v; render(); })));
 
     tr.append(h("td", {},
       h("textarea", { rows: 1, placeholder: "备注 / 风险 / 依赖",
-        oninput: e => { r.note = e.target.value; save(); } }, r.note)));
+        oninput: e => { r.note = e.target.value; renderSoft(); } }, r.note)));
 
     tr.append(h("td", { class: "col-ops" }, h("button", {
       class: "icon-btn", title: "删除",
