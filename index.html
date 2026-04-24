@@ -75,6 +75,13 @@
   .btn.primary:hover { filter: brightness(1.1); }
   .btn.ghost { border-color: transparent; color: var(--text-2); }
 
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+    font-size: 11px; color: var(--text-2); background: var(--bg-chrome); border: 1px solid var(--stroke); }
+  .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+  .status.ok .dot { background: var(--success); }
+  .status.warn .dot { background: var(--warning); }
+  .status.err .dot { background: var(--danger); }
+
   table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--stroke);
     border-radius: 10px; overflow: hidden; background: var(--bg-elev); }
   thead th { text-align: left; padding: 9px 10px; font-weight: 500; font-size: 11px; color: var(--text-3);
@@ -126,6 +133,7 @@
   <div class="row">
     <h1>需求管理</h1>
     <span class="spacer"></span>
+    <span id="status" class="status"><span class="dot"></span><span id="status-text">连接中…</span></span>
     <span class="muted small" id="summary"></span>
   </div>
 
@@ -144,6 +152,9 @@
     <button class="pill" data-sort="workload">按工作量</button>
     <button class="pill" data-sort="none">原始</button>
     <span class="spacer"></span>
+    <button class="btn ghost" id="btn-export" title="导出当前数据为 JSON 备份">导出</button>
+    <button class="btn ghost" id="btn-import" title="从 JSON 文件恢复">导入</button>
+    <input type="file" id="file-import" accept="application/json,.json" style="display:none" />
     <button class="btn ghost" id="btn-reset">重置</button>
     <button class="btn" id="btn-add-bank">+ 银行营销</button>
     <button class="btn primary" id="btn-add-ad">+ 广告投放</button>
@@ -171,11 +182,14 @@
   <div class="dist" id="dist"></div>
 
   <p class="micro muted" style="margin-top:24px">
-    提示：单元格直接编辑，改动仅保存在你当前浏览器的 localStorage。如需共享编辑版本，请把修改后的数据导出给他人或再部署一份。
+    实时协同：数据通过公共 MQTT broker (broker.emqx.io) 同步，任何人打开此链接都会自动收到最新版本，改动会广播给其他人。建议不定期点"导出"留个本地备份。
   </p>
 </div>
 
-<script>
+<script type="module">
+import mqtt from "https://esm.sh/mqtt@5";
+
+// ==== Data schema ====
 const PRIORITY_OPTIONS = [
   { v: "P0", l: "P0 最高" },
   { v: "P1", l: "P1 高" },
@@ -183,7 +197,6 @@ const PRIORITY_OPTIONS = [
   { v: "P3", l: "P3 低" },
 ];
 const STATUS_OPTIONS = ["待排期", "排期中", "进行中", "已完成", "阻塞"];
-const WORKLOAD_OPTIONS = ["0.5", "1", "2", "3", "5", "8", "13", "21"];
 const PRIORITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
 const INITIAL = [
@@ -198,33 +211,119 @@ const INITIAL = [
   { id: "bk-4", category: "银行营销", name: "精准效果看板", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
 ];
 
-const KEY_ROWS = "reqmgmt.rows.v1";
-const KEY_FILTER = "reqmgmt.filter.v1";
-const KEY_SORT = "reqmgmt.sort.v1";
+// ==== Local-only prefs ====
+const KEY_FILTER = "reqmgmt.filter.v2";
+const KEY_SORT = "reqmgmt.sort.v2";
+const KEY_ROWS_CACHE = "reqmgmt.rows.cache.v2";
+function lload(k, d) { try { const v = localStorage.getItem(k); return v==null?d:JSON.parse(v); } catch { return d; } }
+function lsave(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
 
-let state = {
-  rows: load(KEY_ROWS, INITIAL),
-  filter: load(KEY_FILTER, "全部"),
-  sort: load(KEY_SORT, "priority"),
+// ==== App state ====
+const state = {
+  rows: lload(KEY_ROWS_CACHE, INITIAL.slice()),
+  filter: lload(KEY_FILTER, "全部"),
+  sort: lload(KEY_SORT, "priority"),
+  version: 0,          // monotonic, max(local, remote) applied
+  lastRemoteTs: 0,
 };
 
-function load(k, d) {
-  try {
-    const v = localStorage.getItem(k);
-    return v == null ? d : JSON.parse(v);
-  } catch { return d; }
-}
-function save() {
-  localStorage.setItem(KEY_ROWS, JSON.stringify(state.rows));
-  localStorage.setItem(KEY_FILTER, JSON.stringify(state.filter));
-  localStorage.setItem(KEY_SORT, JSON.stringify(state.sort));
-}
 function makeId() { return "req-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6); }
 
-function rowTone(status) {
-  if (status === "已完成") return "tone-success";
-  if (status === "阻塞") return "tone-danger";
-  if (status === "进行中") return "tone-info";
+// ==== MQTT realtime layer ====
+const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+// Fixed "room" for this public page. Everyone with this URL shares this topic.
+const TOPIC = "reqmgmt/mengddi-huang/requirements-backlog/v2/state";
+const clientId = "rb-" + Math.random().toString(36).slice(2, 10);
+
+let client = null;
+let haveAnyRemote = false;
+let pubTimer = null;
+
+function setStatus(kind, text) {
+  const el = document.getElementById("status");
+  const txt = document.getElementById("status-text");
+  el.classList.remove("ok", "warn", "err");
+  if (kind === "ok") el.classList.add("ok");
+  else if (kind === "warn") el.classList.add("warn");
+  else if (kind === "err") el.classList.add("err");
+  txt.textContent = text;
+}
+
+function connect() {
+  setStatus("warn", "连接中…");
+  client = mqtt.connect(BROKER_URL, {
+    clientId,
+    keepalive: 30,
+    reconnectPeriod: 3000,
+    connectTimeout: 10000,
+    clean: true,
+  });
+
+  client.on("connect", () => {
+    setStatus("ok", "已连接 · 实时同步中");
+    client.subscribe(TOPIC, { qos: 1 }, (err) => {
+      if (err) setStatus("err", "订阅失败：" + err.message);
+    });
+    // If no retained message arrives within 2s, we assume we're the authoritative source; re-publish.
+    setTimeout(() => {
+      if (!haveAnyRemote && state.rows.length > 0) publishNow("bootstrap");
+    }, 2000);
+  });
+
+  client.on("reconnect", () => setStatus("warn", "重连中…"));
+  client.on("close", () => setStatus("warn", "连接已断开"));
+  client.on("error", (err) => setStatus("err", "错误：" + err.message));
+
+  client.on("message", (topic, payload) => {
+    if (topic !== TOPIC) return;
+    let msg;
+    try { msg = JSON.parse(payload.toString()); } catch { return; }
+    if (!msg || msg.src === clientId) return; // skip own echo
+    if (!Array.isArray(msg.rows)) return;
+    haveAnyRemote = true;
+    if ((msg.ts || 0) <= state.lastRemoteTs) return;  // older update
+    applyRemote(msg);
+  });
+}
+
+function applyRemote(msg) {
+  state.rows = msg.rows;
+  state.lastRemoteTs = msg.ts;
+  state.version = Math.max(state.version, msg.ts);
+  lsave(KEY_ROWS_CACHE, state.rows);
+  rerenderAll({ preserveFocus: true });
+  flashStatus("已同步对方改动");
+}
+
+function flashStatus(text) {
+  const prev = document.getElementById("status-text").textContent;
+  setStatus("ok", text);
+  setTimeout(() => setStatus("ok", "已连接 · 实时同步中"), 1500);
+}
+
+function scheduleBroadcast() {
+  state.version = Date.now();
+  lsave(KEY_ROWS_CACHE, state.rows);
+  if (!client || !client.connected) return;
+  if (pubTimer) clearTimeout(pubTimer);
+  pubTimer = setTimeout(() => publishNow("edit"), 350);
+}
+function publishNow(reason) {
+  if (!client || !client.connected) return;
+  const payload = JSON.stringify({
+    src: clientId,
+    ts: state.version || Date.now(),
+    reason,
+    rows: state.rows,
+  });
+  client.publish(TOPIC, payload, { qos: 1, retain: true });
+}
+
+// ==== Rendering ====
+function rowTone(s) {
+  if (s === "已完成") return "tone-success";
+  if (s === "阻塞") return "tone-danger";
+  if (s === "进行中") return "tone-info";
   return "";
 }
 function priTone(p) {
@@ -250,20 +349,33 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
-function render() {
-  renderStats();
-  renderControls();
-  renderTable();
-  renderDist();
-  save();
+function snapshotFocus() {
+  const el = document.activeElement;
+  if (!el || !document.getElementById("tbody").contains(el)) return null;
+  const tr = el.closest("tr");
+  const td = el.closest("td");
+  if (!tr || !td) return null;
+  return {
+    rowId: tr.dataset.rowId,
+    colIdx: Array.prototype.indexOf.call(tr.children, td),
+    selectionStart: el.selectionStart,
+    selectionEnd: el.selectionEnd,
+  };
 }
-
-// Light re-render for text edits: updates summary/stats/distribution
-// without rebuilding the table (so the focused input keeps its caret).
-function renderSoft() {
-  renderStats();
-  renderDist();
-  save();
+function restoreFocus(snap) {
+  if (!snap) return;
+  const tr = document.querySelector(`tr[data-row-id="${CSS.escape(snap.rowId)}"]`);
+  if (!tr) return;
+  const td = tr.children[snap.colIdx];
+  if (!td) return;
+  const input = td.querySelector("input, textarea, select");
+  if (!input) return;
+  input.focus();
+  try {
+    if (snap.selectionStart != null && input.setSelectionRange) {
+      input.setSelectionRange(snap.selectionStart, snap.selectionEnd);
+    }
+  } catch {}
 }
 
 function renderStats() {
@@ -287,12 +399,8 @@ function renderStats() {
 }
 
 function renderControls() {
-  document.querySelectorAll("[data-filter]").forEach(b => {
-    b.classList.toggle("active", b.dataset.filter === state.filter);
-  });
-  document.querySelectorAll("[data-sort]").forEach(b => {
-    b.classList.toggle("active", b.dataset.sort === state.sort);
-  });
+  document.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle("active", b.dataset.filter === state.filter));
+  document.querySelectorAll("[data-sort]").forEach(b => b.classList.toggle("active", b.dataset.sort === state.sort));
 }
 
 function renderTable() {
@@ -311,40 +419,36 @@ function renderTable() {
   }
 
   for (const r of list) {
-    const tr = h("tr", { class: rowTone(r.status) });
+    const tr = h("tr", { class: rowTone(r.status), "data-row-id": r.id });
 
     tr.append(h("td", {}, h("span", { class: "pill static " + catTone(r.category) }, r.category)));
 
     tr.append(h("td", {},
       h("input", { type: "text", value: r.name, placeholder: "需求名称",
-        oninput: e => { r.name = e.target.value; renderSoft(); } })));
+        oninput: e => { r.name = e.target.value; scheduleBroadcast(); renderSoft(); } })));
 
     tr.append(h("td", {}, mkSelect(PRIORITY_OPTIONS.map(o => ({ v: o.v, l: o.l })), r.priority,
-      v => { r.priority = v; render(); })));
+      v => { r.priority = v; scheduleBroadcast(); rerenderAll(); })));
 
     tr.append(h("td", {},
-      h("input", {
-        type: "text",
-        value: r.workload,
-        placeholder: "pd",
+      h("input", { type: "text", value: r.workload, placeholder: "pd",
         style: "text-align:right; padding-right:10px;",
-        oninput: e => { r.workload = e.target.value; renderSoft(); },
-      })));
+        oninput: e => { r.workload = e.target.value; scheduleBroadcast(); renderSoft(); } })));
 
     tr.append(h("td", {},
       h("input", { type: "text", value: r.owner, placeholder: "—",
-        oninput: e => { r.owner = e.target.value; renderSoft(); } })));
+        oninput: e => { r.owner = e.target.value; scheduleBroadcast(); renderSoft(); } })));
 
     tr.append(h("td", {}, mkSelect(STATUS_OPTIONS.map(v => ({ v, l: v })), r.status,
-      v => { r.status = v; render(); })));
+      v => { r.status = v; scheduleBroadcast(); rerenderAll(); })));
 
     tr.append(h("td", {},
       h("textarea", { rows: 1, placeholder: "备注 / 风险 / 依赖",
-        oninput: e => { r.note = e.target.value; renderSoft(); } }, r.note)));
+        oninput: e => { r.note = e.target.value; scheduleBroadcast(); renderSoft(); } }, r.note)));
 
     tr.append(h("td", { class: "col-ops" }, h("button", {
       class: "icon-btn", title: "删除",
-      onclick: () => { state.rows = state.rows.filter(x => x.id !== r.id); render(); }
+      onclick: () => { state.rows = state.rows.filter(x => x.id !== r.id); scheduleBroadcast(); rerenderAll(); }
     }, "✕")));
 
     tbody.append(tr);
@@ -369,7 +473,7 @@ function renderDist() {
     const pd = items.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
     const card = h("div", { class: "dist-card" },
       h("div", { class: "head" },
-        h("span", { class: "pill static " + priTone(p), style: "background:" + (p === "P0" ? "rgba(255,92,99,0.15)" : p === "P1" ? "rgba(255,184,76,0.15)" : p === "P2" ? "rgba(82,174,242,0.12)" : "transparent") }, p),
+        h("span", { class: "pill static " + priTone(p) }, p),
         h("span", { class: "muted micro" }, `${items.length} 条 · ${pd} pd`)),
       items.length === 0
         ? h("div", { class: "muted small", style: "margin-top:8px;color:var(--text-4)" }, "无")
@@ -379,30 +483,91 @@ function renderDist() {
   }
 }
 
+function renderSoft() {
+  renderStats();
+  renderDist();
+  lsave(KEY_FILTER, state.filter);
+  lsave(KEY_SORT, state.sort);
+}
+function rerenderAll({ preserveFocus = false } = {}) {
+  const snap = preserveFocus ? snapshotFocus() : null;
+  renderStats();
+  renderControls();
+  renderTable();
+  renderDist();
+  lsave(KEY_FILTER, state.filter);
+  lsave(KEY_SORT, state.sort);
+  if (snap) restoreFocus(snap);
+}
+
 function addRow(category) {
   state.rows.push({
     id: makeId(), category, name: "", priority: "P2", workload: "3",
     owner: "", status: "待排期", note: "",
   });
-  render();
+  scheduleBroadcast();
+  rerenderAll();
 }
 
+// ==== UI event wiring ====
 document.querySelectorAll("[data-filter]").forEach(b => {
-  b.addEventListener("click", () => { state.filter = b.dataset.filter; render(); });
+  b.addEventListener("click", () => { state.filter = b.dataset.filter; rerenderAll(); });
 });
 document.querySelectorAll("[data-sort]").forEach(b => {
-  b.addEventListener("click", () => { state.sort = b.dataset.sort; render(); });
+  b.addEventListener("click", () => { state.sort = b.dataset.sort; rerenderAll(); });
 });
 document.getElementById("btn-reset").addEventListener("click", () => {
-  if (confirm("恢复到初始需求列表？当前改动会被清除。")) {
-    state.rows = JSON.parse(JSON.stringify(INITIAL));
-    render();
-  }
+  if (!confirm("恢复到初始需求列表？当前改动会被清除，并广播给其他人。")) return;
+  state.rows = JSON.parse(JSON.stringify(INITIAL));
+  scheduleBroadcast();
+  rerenderAll();
 });
 document.getElementById("btn-add-ad").addEventListener("click", () => addRow("广告投放"));
 document.getElementById("btn-add-bank").addEventListener("click", () => addRow("银行营销"));
 
-render();
+document.getElementById("btn-export").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state.rows, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  a.href = url;
+  a.download = `requirements-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("btn-import").addEventListener("click", () => document.getElementById("file-import").click());
+document.getElementById("file-import").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data)) throw new Error("文件格式不对，需要 JSON 数组");
+      if (!confirm(`导入 ${data.length} 条需求，会替换当前列表并广播给其他人，继续？`)) return;
+      state.rows = data.map(r => ({
+        id: r.id || makeId(),
+        category: r.category || "广告投放",
+        name: r.name || "",
+        priority: r.priority || "P2",
+        workload: r.workload || "",
+        owner: r.owner || "",
+        status: r.status || "待排期",
+        note: r.note || "",
+      }));
+      scheduleBroadcast();
+      rerenderAll();
+    } catch (err) { alert("导入失败：" + err.message); }
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+
+// ==== Bootstrap ====
+rerenderAll();
+connect();
 </script>
 </body>
 </html>
