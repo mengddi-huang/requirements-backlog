@@ -67,6 +67,7 @@
   .pill.tone-warning { color: var(--warning); border-color: var(--warning); }
   .pill.tone-danger { color: var(--danger); border-color: var(--danger); }
   .pill.tone-success { color: var(--success); border-color: var(--success); }
+  .pill.tone-critical { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; letter-spacing: 0.5px; }
 
   .btn { height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--stroke-2); background: transparent;
     color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; }
@@ -93,6 +94,9 @@
   tbody tr.tone-success td { background: rgba(60, 207, 145, 0.08); }
   tbody tr.tone-info td { background: rgba(82, 174, 242, 0.07); }
   tbody tr.tone-danger td { background: rgba(255, 92, 99, 0.08); }
+  tbody tr.tone-warning td { background: rgba(255, 184, 76, 0.09); }
+  tbody tr.tone-critical td { background: rgba(255, 56, 96, 0.22); box-shadow: inset 3px 0 0 var(--danger); }
+  tbody tr.tone-critical td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 
   input[type=text], textarea, select {
     width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px;
@@ -116,7 +120,7 @@
   .col-ops { width: 40px; text-align: right; }
   .col-note { min-width: 200px; }
 
-  .dist { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+  .dist { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 14px; }
   .dist-card { padding: 12px; border: 1px solid var(--stroke); border-radius: 10px; background: var(--bg-elev); }
   .dist-card ul { margin: 8px 0 0; padding: 0; list-style: none; }
   .dist-card li { color: var(--text-2); font-size: 12px; padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -193,13 +197,14 @@ import mqtt from "https://esm.sh/mqtt@5";
 
 // ==== Data schema ====
 const PRIORITY_OPTIONS = [
+  { v: "P00", l: "P00 紧急" },
   { v: "P0", l: "P0 最高" },
   { v: "P1", l: "P1 高" },
   { v: "P2", l: "P2 中" },
   { v: "P3", l: "P3 低" },
 ];
 const STATUS_OPTIONS = ["待排期", "待产品方案", "开发中", "测试中", "待验收", "已上线"];
-const PRIORITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 };
+const PRIORITY_RANK = { P00: -1, P0: 0, P1: 1, P2: 2, P3: 3 };
 
 const INITIAL = [
   { id: "ad-1", category: "广告投放", name: "智能创意", priority: "P1", workload: "5", owner: "", status: "待排期", note: "" },
@@ -322,13 +327,16 @@ function publishNow(reason) {
 }
 
 // ==== Rendering ====
-function rowTone(s) {
+function rowTone(r) {
+  if (r.priority === "P00") return "tone-critical";
+  const s = r.status;
   if (s === "已上线") return "tone-success";
   if (s === "待验收") return "tone-warning";
   if (s === "开发中" || s === "测试中") return "tone-info";
   return "";
 }
 function priTone(p) {
+  if (p === "P00") return "tone-critical";
   if (p === "P0") return "tone-danger";
   if (p === "P1") return "tone-warning";
   if (p === "P2") return "tone-info";
@@ -387,9 +395,10 @@ function restoreFocus(snap) {
 function renderStats() {
   const rows = state.rows;
   const totalPd = rows.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
+  const p00 = rows.filter(r => r.priority === "P00").length;
   const p0 = rows.filter(r => r.priority === "P0").length;
-  const done = rows.filter(r => r.status === "已完成").length;
-  const blocked = rows.filter(r => r.status === "阻塞").length;
+  const done = rows.filter(r => r.status === "已上线").length;
+  const inDev = rows.filter(r => r.status === "开发中" || r.status === "测试中" || r.status === "待验收").length;
 
   document.getElementById("summary").textContent = `共 ${rows.length} 条 · 合计 ${totalPd} pd`;
 
@@ -397,10 +406,13 @@ function renderStats() {
   el.innerHTML = "";
   el.append(
     h("div", { class: "stat" }, h("div", { class: "v" }, rows.length), h("div", { class: "l" }, "需求总数")),
-    h("div", { class: "stat" + (p0 > 0 ? " danger" : "") }, h("div", { class: "v" }, p0), h("div", { class: "l" }, "P0 最高优")),
+    h("div", { class: "stat" + (p00 > 0 ? " danger" : "") },
+      h("div", { class: "v" }, `${p00}/${p0}`),
+      h("div", { class: "l" }, "P00 紧急 / P0 最高")),
     h("div", { class: "stat" }, h("div", { class: "v" }, totalPd), h("div", { class: "l" }, "总工作量 (pd)")),
-    h("div", { class: "stat" + (blocked > 0 ? " warning" : "") }, h("div", { class: "v" }, `${done}/${rows.length}`),
-      h("div", { class: "l" }, blocked > 0 ? `已完成 · ${blocked} 阻塞` : "已完成")),
+    h("div", { class: "stat" + (inDev > 0 ? " warning" : "") },
+      h("div", { class: "v" }, `${inDev} · ${done}`),
+      h("div", { class: "l" }, "进行中 · 已上线")),
   );
 }
 
@@ -425,7 +437,7 @@ function renderTable() {
   }
 
   for (const r of list) {
-    const tr = h("tr", { class: rowTone(r.status), "data-row-id": r.id });
+    const tr = h("tr", { class: rowTone(r), "data-row-id": r.id });
 
     tr.append(h("td", {}, h("span", { class: "pill static " + catTone(r.category) }, r.category)));
 
@@ -474,7 +486,7 @@ function mkSelect(options, value, onchange) {
 function renderDist() {
   const el = document.getElementById("dist");
   el.innerHTML = "";
-  for (const p of ["P0", "P1", "P2", "P3"]) {
+  for (const p of ["P00", "P0", "P1", "P2", "P3"]) {
     const items = state.rows.filter(r => r.priority === p);
     const pd = items.reduce((s, r) => s + (parseFloat(r.workload) || 0), 0);
     const card = h("div", { class: "dist-card" },
