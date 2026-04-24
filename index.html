@@ -91,12 +91,9 @@
   tbody td { padding: 6px 8px; border-bottom: 1px solid var(--stroke); vertical-align: middle; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
-  tbody tr.tone-success td { background: rgba(60, 207, 145, 0.08); }
-  tbody tr.tone-info td { background: rgba(82, 174, 242, 0.07); }
-  tbody tr.tone-danger td { background: rgba(255, 92, 99, 0.08); }
-  tbody tr.tone-warning td { background: rgba(255, 184, 76, 0.09); }
-  tbody tr.tone-critical td { background: rgba(255, 56, 96, 0.22); box-shadow: inset 3px 0 0 var(--danger); }
+  tbody tr.tone-critical td { background: rgba(255, 56, 96, 0.22); }
   tbody tr.tone-critical td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+  tbody tr.tone-high td { background: rgba(255, 92, 99, 0.08); }
 
   input[type=text], textarea, select {
     width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px;
@@ -105,7 +102,7 @@
   }
   input[type=text]:hover, textarea:hover, select:hover { background: var(--bg-chrome); }
   input[type=text]:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--bg); }
-  textarea { resize: vertical; min-height: 28px; line-height: 1.4; font-family: inherit; }
+  textarea { resize: none; min-height: 28px; line-height: 1.4; font-family: inherit; overflow: hidden; }
   select { appearance: none; padding-right: 22px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23a7adbb' d='M1 3l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; }
 
   .icon-btn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
@@ -329,10 +326,7 @@ function publishNow(reason) {
 // ==== Rendering ====
 function rowTone(r) {
   if (r.priority === "P00") return "tone-critical";
-  const s = r.status;
-  if (s === "已上线") return "tone-success";
-  if (s === "待验收") return "tone-warning";
-  if (s === "开发中" || s === "测试中") return "tone-info";
+  if (r.priority === "P0") return "tone-high";
   return "";
 }
 function priTone(p) {
@@ -346,6 +340,15 @@ function catTone(c) {
   if (c === "广告投放") return "tone-info";
   if (c === "银行营销") return "tone-warning";
   return "";
+}
+
+function autosize(ta) {
+  if (!ta) return;
+  ta.style.height = "auto";
+  ta.style.height = Math.max(28, ta.scrollHeight) + "px";
+}
+function autosizeAll() {
+  document.querySelectorAll("#tbody textarea").forEach(autosize);
 }
 
 function h(tag, attrs = {}, ...kids) {
@@ -462,7 +465,7 @@ function renderTable() {
 
     tr.append(h("td", {},
       h("textarea", { rows: 1, placeholder: "备注 / 风险 / 依赖",
-        oninput: e => { r.note = e.target.value; scheduleBroadcast(); renderSoft(); } }, r.note)));
+        oninput: e => { r.note = e.target.value; autosize(e.target); scheduleBroadcast(); renderSoft(); } }, r.note)));
 
     tr.append(h("td", { class: "col-ops" }, h("button", {
       class: "icon-btn", title: "删除",
@@ -515,6 +518,7 @@ function rerenderAll({ preserveFocus = false } = {}) {
   renderDist();
   lsave(KEY_FILTER, state.filter);
   lsave(KEY_SORT, state.sort);
+  autosizeAll();
   if (snap) restoreFocus(snap);
 }
 
