@@ -322,8 +322,14 @@ function renderTable() {
     tr.append(h("td", {}, mkSelect(PRIORITY_OPTIONS.map(o => ({ v: o.v, l: o.l })), r.priority,
       v => { r.priority = v; render(); })));
 
-    tr.append(h("td", {}, mkSelect(WORKLOAD_OPTIONS.map(v => ({ v, l: v + " pd" })), r.workload,
-      v => { r.workload = v; render(); })));
+    tr.append(h("td", {},
+      h("input", {
+        type: "text",
+        value: r.workload,
+        placeholder: "pd",
+        style: "text-align:right; padding-right:10px;",
+        oninput: e => { r.workload = e.target.value; renderSoft(); },
+      })));
 
     tr.append(h("td", {},
       h("input", { type: "text", value: r.owner, placeholder: "—",
